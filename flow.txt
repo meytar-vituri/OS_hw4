@@ -1,0 +1,23 @@
+general flow:
+*. make sure there are 3 arguments in argv.
+    make sure argv[1] is a searchable directory.
+*. create a FIFO queue.
+*. push the argv[1] to the queue(the search root directory).
+*. create argv[2] searching threads, for each one of them make sure it is created.
+*. signal the threads to start searching.
+    the flow in each thread:
+    #. wait for all the other threads to be created and wait for que from the main thread to start.
+    #. dequeue the head of the queue.
+        -if the queue is empty free the lock(don't busy wait).
+        -if all the other threads are waiting as well, all searching thread should exit.
+    #. for each file in the directory:
+        "."\".."\symbolic link: ignore.
+        directory: add it to the queue if searchable(should wake up a waiting thread if there's any), if not searchable print the exact error msg from the pdf.
+        file: if in contains T(case sensitive) print the absolute path of the file and matched_files_counter++.
+    #. after done iterating over all the files, attempt to dequeue another directory.
+    #. for errors in the thread: print the error to stderr and exit the thread, not the program.
+*. before exiting the program print matched_files_counter in the exact format as in the pdf if don't need to exit before that.
+*. exit the program for one of the following cases:
+    #. the queue is empty and non of the threads is still working.
+    #. all searching threads have died due to an error.
+
