@@ -1,0 +1,2 @@
+/home/student/CLionProjects/OS4/cmake-build-debug/CMakeFiles/rebuild_cache.dir
+/home/student/CLionProjects/OS4/cmake-build-debug/CMakeFiles/edit_cache.dir
