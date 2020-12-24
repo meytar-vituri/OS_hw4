@@ -5,13 +5,48 @@
 #include <string.h>
 #include <stdatomic.h>
 
-#define NUM_THREADS 5
+#define FAILED 1
 static long TOTAL;
-//int counter = 1;
 atomic_int counter = 1;
 pthread_mutex_t lock;
 
+//---------the queue struct and the queue methods----------
+typedef struct queue_node {
+    char * dir_name;
+    struct queue_node *next_node;
+} queue_node;
+
+typedef struct fifo_queue {
+    queue_node *head;
+    queue_node *tail;
+}fifo_queue;
+
+
+//push a search directory into the queue
+void push (fifo_queue *queue, char *dir_name ){
+    if (queue == NULL){
+        fprintf("queue not initialized");
+        exit(FAILED);
+    }
+    queue_node *temp = (queue_node *) malloc (sizeof(queue_node));
+    if (temp == NULL){
+        fprintf("error allocating queue node\n");
+        exit(FAILED);
+    }
+    temp->dir_name = dir_name;
+    temp->next_node = NULL;
+    if (queue->head == NULL && queue->tail == NULL){
+        queue->head = queue->tail = temp;
+        return;
+    } else {
+        queue->tail->next_node=temp;
+        queue->tail = temp;
+        return;
+    }
+}
 //====================================================
+
+
 int next_counter(void) {
     // pthread_mutex_lock( &lock );
     // int temp = ++counter;
@@ -53,11 +88,26 @@ void *prime_print(void *t) {
 
 //====================================================
 int main(int argc, char *argv[]) {
-    //TODO: make sure there are 3 arguments.
-    //TODO: make sure argv[1] is a searchable directory.
-    //TODO: create FIFO queue.
-    //TODO: add the search root to the queue.
-    pthread_t thread[NUM_THREADS];
+    if (argc<3){
+        fprintf(stderr, "only %d arguments submitted instead of 3\n",argc);
+        exit(FAILED);
+    }
+    char *root_dir, *search_term;
+    int num_of_threads;
+    fifo_queue *dir_queue = (fifo_queue *)malloc(sizeof(fifo_queue));
+    if (dir_queue == NULL){
+        fprintf(stderr, "FIFO queue memory allocation failed\n");
+        exit(FAILED);
+    }
+    root_dir = argv[1];
+    search_term = argv[2];
+    num_of_threads = strtol(argv[3]);
+
+    push(dir_queue, root_dir);
+
+
+    pthread_t thread[num_of_threads];
+
     int rc;
     void *status;
 

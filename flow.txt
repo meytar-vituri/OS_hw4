@@ -1,8 +1,8 @@
 general flow:
-*. make sure there are 3 arguments in argv.
-    make sure argv[1] is a searchable directory.
-*. create a FIFO queue.
-*. push the argv[1] to the queue(the search root directory).
+*. make sure there are 3 arguments in argv. - V
+    make sure argv[1] is a searchable directory - will be done in the first thread.
+*. create a FIFO queue. - V
+*. push the argv[1] to the queue(the search root directory). - V
 *. create argv[2] searching threads, for each one of them make sure it is created.
 *. signal the threads to start searching.
     the flow in each thread:
@@ -21,3 +21,5 @@ general flow:
     #. the queue is empty and non of the threads is still working.
     #. all searching threads have died due to an error.
 
+
+check if head!=NULL or(regular, not logic) tail!=NULL?
