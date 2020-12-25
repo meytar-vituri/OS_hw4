@@ -3,7 +3,7 @@ general flow:
     make sure argv[1] is a searchable directory - will be done in the first thread.
 *. create a FIFO queue. - V
 *. push the argv[1] to the queue(the search root directory). - V
-*. create argv[2] searching threads, for each one of them make sure it is created.
+*. create argv[2] searching threads, for each one of them make sure it is created. - V
 *. signal the threads to start searching.
     the flow in each thread:
     #. wait for all the other threads to be created and wait for que from the main thread to start.

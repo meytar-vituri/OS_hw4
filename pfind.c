@@ -6,6 +6,13 @@
 #include <stdatomic.h>
 
 #define FAILED 1
+
+int matched_files_counter = 0;
+pthread_mutex_t matches_lock;
+
+int num_of_running_threads;
+pthread_mutex_t num_of_running_lock;
+
 static long TOTAL;
 atomic_int counter = 1;
 pthread_mutex_t lock;
@@ -25,12 +32,12 @@ typedef struct fifo_queue {
 //push a search directory into the queue
 void push (fifo_queue *queue, char *dir_name ){
     if (queue == NULL){
-        fprintf("queue not initialized");
+        fprintf(stderr,"queue not initialized");
         exit(FAILED);
     }
     queue_node *temp = (queue_node *) malloc (sizeof(queue_node));
     if (temp == NULL){
-        fprintf("error allocating queue node\n");
+        fprintf(stderr,"error allocating queue node\n");
         exit(FAILED);
     }
     temp->dir_name = dir_name;
@@ -44,9 +51,51 @@ void push (fifo_queue *queue, char *dir_name ){
         return;
     }
 }
-//====================================================
+
+int is_empty(fifo_queue *queue){
+    return (queue->head == NULL && queue->tail == NULL);
+}
+
+//---------the threads methods----------
+
+//a function that allocates memory for an array of threads and initializing each one of them.
+void create_threads (pthread_t *threads, int num_of_threads){
+    threads = (pthread_t *)malloc(num_of_threads*sizeof(pthread_t));
+    if (threads == NULL){
+        fprintf(stderr, "error allocating memory for threads\n");
+        exit(FAILED);
+    }
+    for (int i=0; i<num_of_threads;i ++){
+        if (0 != pthread_create(&(threads[i]), NULL, &threads_main, NULL)){
+            fprintf(stderr, "error creating thread number %d\n", i);
+            exit(FAILED);
+        }
+    }
+}
+
+void *threads_main (){
+    while (){ //TODO: add 1 to the cond
+
+    }
+}
 
 
+//---------general use functions----------
+
+void init_locks(){
+    int rc;
+    rc = pthread_mutex_init(&matches_lock, NULL);
+    if (rc) {
+        printf(stderr, "ERROR in pthread_mutex_init(): matches lock\n");
+        exit(FAILED);
+    }
+
+    rc = pthread_mutex_init(&num_of_running_lock, NULL);
+    if (rc) {
+        printf(stderr, "ERROR in pthread_mutex_init(): num of running threads lock\n");
+        exit(FAILED);
+    }
+}
 int next_counter(void) {
     // pthread_mutex_lock( &lock );
     // int temp = ++counter;
@@ -94,6 +143,7 @@ int main(int argc, char *argv[]) {
     }
     char *root_dir, *search_term;
     int num_of_threads;
+    pthread_t *threads;
     fifo_queue *dir_queue = (fifo_queue *)malloc(sizeof(fifo_queue));
     if (dir_queue == NULL){
         fprintf(stderr, "FIFO queue memory allocation failed\n");
@@ -104,10 +154,16 @@ int main(int argc, char *argv[]) {
     num_of_threads = strtol(argv[3]);
 
     push(dir_queue, root_dir);
+    //initializing all the locks
+    init_locks();
+
+    //create an array of num_of_threads threads and create them.
+    create_threads(threads, num_of_threads);
+
+    //TODO: signal the threads to start searching.
 
 
-    pthread_t thread[num_of_threads];
-
+    //TODO: locks destroying function
     int rc;
     void *status;
 
