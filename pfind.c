@@ -129,70 +129,67 @@ void create_threads (pthread_t *threads, int num_of_threads){
     }
 }
 
-void handle_dir(char *path, char *dir_name){
-    //ignore the directories . and ..
-    if (strcmp(dir_name, "..")== 0){
-        break;
-    }
-    if (strcmp(dir_name, ".") == 0){
-        break;
-    }
-    char cur_dir = malloc(PATH_MAX * sizeof(char ));
-    if (!cur_dir){
-        num_of_running_threads--;
-        fprintf(stderr, "error in memory allocation inside a thread\n");
-        pthread_exit(NULL);
-    }
-    strcpy(cur_dir, path);
-    if ((push(cur_dir))==FAILED){
-        num_of_running_threads--;
-        printf(stderr, "error pushing to queue, exiting thread\n");
-        pthread_exit(NULL);
-    }
+int is_readable(char *path){
+    struct stat s;
+    lstat(path, &s);
+    return s.st_mode & S_IRUSR;
 }
 
-void handle_file(char *path, chat *file_name){
-    //ignore the files . and ..
-    if (strcmp(file_name, "..")== 0){
+char *create_new_path (char *dir, char *entry){
+    unsigned long total_length = strlen(dir) + strlen(entry) + 2;
+    char *new_path = malloc(total_length*sizeof(char));
+    snprintf(new_path, total_length, "%s/%s", dir, entry);
+    new_path[total_length-1] = '\0';
+    return new_path;
+}
+
+void handle_entry(char *dir, dirent *entry){
+    char *cur_path;
+    //ignoring the directories . and ..
+    if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..")){
         break;
     }
-    if (strcmp(file_name, ".") == 0){
-        break;
-    }
-    if (strstr(file_name, search_term) != NULL){
-        matched_files_counter++;
-        printf("%s\n", path);
+    cur_path = create_new_path(dir, entry->d_name)
+    int d_type = entry->d_type;
+    if (d_type ==4){
+        if (is_readable(cur_path)){
+            push(cur_path);
+        } else {
+            printf("Directory %s: Permission denied.\n", cur_path);
+        }
+    } else if (d_type ==8 || d_type == 10) {
+        if (strstr(entry->d_name, search_term) != NULL){
+            matched_files_counter++;
+            printf("%s\n", cur_path);
+        }
+        free(cur_path);
     }
 }
 
 void iterate_dir (char * dir){
     struct dirent cur_dirent;
     DIR iterated_dir;
-    char path[PATH_MAX];
+
+//    char path[PATH_MAX];
     if ((iterated_dir = opendir(dir)) == NULL){
         num_of_running_threads--;
         fprintf(stderr, "error opening the dir %s\n", dir);
         pthread_exit(NULL);
     }
-    while ((cur_dirent = readdir(dir))!= NULL){
-        struct stat st_buf;
-        if (dir[strlen(dir) -1 ] != '/'){
-            sprintf(path, "%s/%s", dir, cur_dirent -> d_name);
-        } else {
-            sprintf(path, "%s%s", dir, cur_dirent .d_name);
-        }
-        if (lstat(path, &st_buf) == -1 ){
-            num_of_running_threads--;
-            fprintf(stderr, "error in stat the file %s\n", path);
-            pthread_exit(NULL);
-        }
-        if (S_ISDIR(stbuf.st_mode)){
-            handle_dir(path, cur_dirent-> d_name)
-        } else {
-            handle_file (path, cur_dirent  -> d_name)
-        }
+
+    errno = 0;
+    while ((cur_dirent = readdir(iterated_dir)) != NULL){
+        handle_entry(dir, cur_dirent);
     }
+
     closedir(iterated_dir);
+    if (errno !=0){
+        num_of_running_threads--;
+        fprintf(stderr, "error reading from dir%s\n", dir);
+        pthread_exit(NULL);
+    }
+    
+
 }
 
 void *threads_main (){

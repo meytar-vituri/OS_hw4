@@ -6,9 +6,9 @@ general flow:
 *. create argv[2] searching threads, for each one of them make sure it is created. - V
 *. signal the threads to start searching.
     the flow in each thread:
-    #. wait for all the other threads to be created and wait for que from the main thread to start.
+    #. wait for all the other threads to be created and wait for que from the main thread to start. - V
     #. dequeue the head of the queue.
-        -if the queue is empty free the lock(don't busy wait).
+        -if the queue is empty free the lock(don't busy wait). - V
         -if all the other threads are waiting as well, all searching thread should exit.
     #. for each file in the directory:
         "."\".."\symbolic link: ignore.
