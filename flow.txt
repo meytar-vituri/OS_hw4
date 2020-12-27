@@ -13,7 +13,7 @@ general flow:
     #. for each file in the directory:
         "."\".."\symbolic link: ignore.
         directory: add it to the queue if searchable(should wake up a waiting thread if there's any), if not searchable print the exact error msg from the pdf.
-        file: if in contains T(case sensitive) print the absolute path of the file and matched_files_counter++.
+        file: if it contains T(case sensitive) print the absolute path of the file and matched_files_counter++.
     #. after done iterating over all the files, attempt to dequeue another directory.
     #. for errors in the thread: print the error to stderr and exit the thread, not the program.
 *. before exiting the program print matched_files_counter in the exact format as in the pdf if don't need to exit before that.
