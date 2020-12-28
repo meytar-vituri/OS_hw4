@@ -15,6 +15,7 @@
 //---------global variables and their locks----------
 atomic_int matched_files_counter = 0;
 atomic_int num_of_running_threads = 0;
+atomic_int num_of_failed_threads = 0;
 
 int num_of_threads = 0;
 int num_of_created_threads = 0;
@@ -85,11 +86,11 @@ int push ( char *dir_name ){
 char * pop (){
     pthread_mutex_lock(&queue_actions_lock);
     num_of_running_threads--;
-    if (num_of_running_threads == 0){
-        //TODO: finish everything, the queue is empty and no process is running
+    if (num_of_running_threads == 0 && is_empty()){
+        return NULL;
     }
     while (is_empty()){
-        pthread_cond_wait(&empty_queue_cv);
+        pthread_cond_wait(&empty_queue_cv, &queue_actions_lock);
     }
     num_of_running_threads++;
     queue_node *temp = dir_queue->head;
@@ -173,6 +174,7 @@ void iterate_dir (char * dir){
 //    char path[PATH_MAX];
     if ((iterated_dir = opendir(dir)) == NULL){
         num_of_running_threads--;
+        num_of_failed_threads++;
         fprintf(stderr, "error opening the dir %s\n", dir);
         pthread_exit(NULL);
     }
@@ -185,10 +187,11 @@ void iterate_dir (char * dir){
     closedir(iterated_dir);
     if (errno !=0){
         num_of_running_threads--;
+        num_of_failed_threads++;
         fprintf(stderr, "error reading from dir%s\n", dir);
         pthread_exit(NULL);
     }
-    
+
 
 }
 
@@ -196,13 +199,16 @@ void *threads_main (){
     //wait until all threads created
     pthread_mutex_lock(&num_of_created_lock);
     if (num_of_threads != num_of_created_threads){
-        pthread_cond_wait(&num_of_threads_cv);
+        pthread_cond_wait(&num_of_threads_cv, %num_of_created_lock);
     }
     pthread_mutex_unlock(&num_of_created_lock);
 
 
     while (1){
-        char *dir = pop(fifo_queue);
+        char *dir = pop();
+        if (dir == NULL){
+            break;
+        }
         iterate_dir(dir);
         free(dir);
     }
@@ -210,9 +216,15 @@ void *threads_main (){
     pthread_exit(NULL);
 }
 
+void wait_for_all_threads(pthread_t *threads) {
+    for (int i = 0; i < num_of_threads ; ++i) {
+        pthread_join(threads[i], NULL);
+    }
+}
 
 //---------general use functions----------
 
+//initializing all the locks and the cvs
 void init_locks_and_cvs(){
     int rc;
     rc = pthread_mutex_init(&matches_lock, NULL);
@@ -244,11 +256,34 @@ void init_locks_and_cvs(){
         printf(stderr, "ERROR in pthread_cond_init(): num of threads cond var lock\n");
         exit(FAILED);
     }
-
-
 }
 
+//destroying all the locks and the cvs
+void destroy_locks_and_cvs(){
+    pthread_mutex_destroy(&num_of_created_lock);
+    pthread_mutex_destroy(&queue_actions_lock);
+    pthread_cond_destroy(&empty_queue_cv);
+    pthread_cond_destroy(&num_of_threads_cv);
+}
 
+int is_dir (char *path){
+    struct stat buff;
+    lstat(path, &buff);
+    if (S_ISDIR(buff.st_mode)){
+        return 1;
+    } else {
+        return 0;
+    }
+}
+
+char *check_root_dir(char *arg){
+    if(!is_dir(arg)){
+        return NULL;
+    }
+    char *formatted_dir = malloc((strlen(arg)+1)*sizeof(char));
+    memcpy(formatted_dir, arg, strlen(arg)+1);
+    return formatted_dir;
+}
 //====================================================
 int main(int argc, char *argv[]) {
     if (argc<3){
@@ -265,9 +300,17 @@ int main(int argc, char *argv[]) {
     dir_queue->head = NULL;
     dir_queue->tail = NULL;
 
-    root_dir = argv[1];
+    if ((check_root_dir(argv[1])) == NULL){
+        fprintf(stderr, "argv[1] is invalid directory\n");
+        exit(FAILED);
+    }
     search_term = argv[2];
-    num_of_threads = strtol(argv[3]);
+
+    num_of_threads =(int) strtol(argv[3], NULL,10);
+    if (num_of_threads == UINT_MAX && errno == ERANGE){
+        fprintf(stderr, "%s is too big for an integer\n", argv[3]);
+        exit(FAILED);
+    }
 
     if ((push(root_dir)) == FAILED){
         exit(FAILED);
@@ -278,9 +321,21 @@ int main(int argc, char *argv[]) {
     //create an array of num_of_threads threads and create them.
     create_threads(threads, num_of_threads);
 
+    //wait for all the threads to finish
+    wait_for_all_threads(threads);
+    printf("Done searching, found %d files\n", matched_files_counter);
+
+    //clean our working environment
+    destroy_locks_and_cvs();
+    free(dir_queue);
+    free(threads);
+
+    //see if any thread failed
+    if (num_of_failed_threads>0){
+        exit(FAILED);
+    }
 
 
-    //TODO: locks destroying function
 
 }
 //=================== END OF FILE ====================
