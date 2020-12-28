@@ -12,6 +12,8 @@
 
 #define FAILED 1
 #define SUCCESS 0
+
+
 //---------global variables and their locks----------
 atomic_int matched_files_counter = 0;
 atomic_int num_of_running_threads = 0;
@@ -67,7 +69,7 @@ int push ( char *dir_name ){
     }
     temp->dir_name = dir_name;
     temp->next_node = NULL;
-    pthread_mutex_lock(&queue_actions_lock)
+    pthread_mutex_lock(&queue_actions_lock);
     if (dir_queue->head == NULL ){
         dir_queue->head = temp;
         dir_queue -> tail = temp ->next_node;
@@ -106,29 +108,9 @@ char * pop (){
 
 //---------the threads methods----------
 
-//a function that allocates memory for an array of threads and initializing each one of them.
-void create_threads (pthread_t *threads, int num_of_threads){
-    threads = (pthread_t *)malloc(num_of_threads*sizeof(pthread_t));
-    if (threads == NULL){
-        fprintf(stderr, "error allocating memory for threads\n");
-        exit(FAILED);
-    }
-    for (int i=0; i<num_of_threads;i ++){
-        pthread_mutex_lock(&num_of_created_lock);
-        if (0 != pthread_create(&(threads[i]), NULL, &threads_main, NULL)){
-            fprintf(stderr, "error creating thread number %d\n", i);
-            pthread_mutex_unlock(&num_of_created_lock)
-            exit(FAILED);
-        } else {
-            num_of_created_threads ++;
-            num_of_running_threads++;
-            if (num_of_created_threads == num_of_threads){ //if all all threads created - signal the threads to start working
-                pthread_cond_broadcast(&num_of_threads_cv);
-            }
-            pthread_mutex_unlock(&num_of_created_lock);
-        }
-    }
-}
+
+
+
 
 int is_readable(char *path){
     struct stat s;
@@ -144,13 +126,13 @@ char *create_new_path (char *dir, char *entry){
     return new_path;
 }
 
-void handle_entry(char *dir, dirent *entry){
+void handle_entry(char *dir,struct dirent *entry){
     char *cur_path;
     //ignoring the directories . and ..
     if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..")){
-        break;
+        return;
     }
-    cur_path = create_new_path(dir, entry->d_name)
+    cur_path = create_new_path(dir, entry->d_name);
     int d_type = entry->d_type;
     if (d_type ==4){
         if (is_readable(cur_path)){
@@ -168,8 +150,8 @@ void handle_entry(char *dir, dirent *entry){
 }
 
 void iterate_dir (char * dir){
-    struct dirent cur_dirent;
-    DIR iterated_dir;
+    struct dirent *cur_dirent;
+    DIR *iterated_dir;
 
 //    char path[PATH_MAX];
     if ((iterated_dir = opendir(dir)) == NULL){
@@ -199,7 +181,7 @@ void *threads_main (){
     //wait until all threads created
     pthread_mutex_lock(&num_of_created_lock);
     if (num_of_threads != num_of_created_threads){
-        pthread_cond_wait(&num_of_threads_cv, %num_of_created_lock);
+        pthread_cond_wait(&num_of_threads_cv, &num_of_created_lock);
     }
     pthread_mutex_unlock(&num_of_created_lock);
 
@@ -222,38 +204,57 @@ void wait_for_all_threads(pthread_t *threads) {
     }
 }
 
+//a function that allocates memory for an array of threads and initializing each one of them.
+void create_threads (pthread_t *threads, int num_of_threads){
+    threads = (pthread_t *)malloc(num_of_threads*sizeof(pthread_t));
+    if (threads == NULL){
+        fprintf(stderr, "error allocating memory for threads\n");
+        exit(FAILED);
+    }
+    for (int i=0; i<num_of_threads;i ++){
+        pthread_mutex_lock(&num_of_created_lock);
+        if (0 != pthread_create(&(threads[i]), NULL, &threads_main, NULL)){
+            fprintf(stderr, "error creating thread number %d\n", i);
+            pthread_mutex_unlock(&num_of_created_lock);
+            exit(FAILED);
+        } else {
+            num_of_created_threads ++;
+            num_of_running_threads++;
+            if (num_of_created_threads == num_of_threads){ //if all all threads created - signal the threads to start working
+                pthread_cond_broadcast(&num_of_threads_cv);
+            }
+            pthread_mutex_unlock(&num_of_created_lock);
+        }
+    }
+}
+
 //---------general use functions----------
 
 //initializing all the locks and the cvs
 void init_locks_and_cvs(){
     int rc;
-    rc = pthread_mutex_init(&matches_lock, NULL);
-    if (rc) {
-        printf(stderr, "ERROR in pthread_mutex_init(): matches lock\n");
-        exit(FAILED);
-    }
 
     rc = pthread_mutex_init(&num_of_created_lock, NULL);
     if (rc) {
-        printf(stderr, "ERROR in pthread_mutex_init(): num of running threads lock\n");
+        fprintf(stderr, "ERROR in pthread_mutex_init(): num of running threads lock\n");
         exit(FAILED);
     }
 
     rc = pthread_mutex_init(&queue_actions_lock, NULL);
     if (rc) {
-        printf(stderr, "ERROR in pthread_mutex_init(): queue actions lock lock\n");
+        fprintf(stderr, "ERROR in pthread_mutex_init(): queue actions lock lock\n");
         exit(FAILED);
     }
 
     rc = pthread_cond_init(&empty_queue_cv, NULL);
     if (rc) {
-        printf(stderr, "ERROR in pthread_cond_init(): empty queue cond var lock\n");
+        fprintf(stderr, "ERROR in pthread_cond_init(): empty queue cond var lock\n");
         exit(FAILED);
     }
 
     rc = pthread_cond_init(&num_of_threads_cv, NULL);
     if (rc) {
-        printf(stderr, "ERROR in pthread_cond_init(): num of threads cond var lock\n");
+        fprintf(stderr, "ERROR in pthread_cond_init(): num of threads cond var lock\n");
         exit(FAILED);
     }
 }
@@ -300,7 +301,7 @@ int main(int argc, char *argv[]) {
     dir_queue->head = NULL;
     dir_queue->tail = NULL;
 
-    if ((check_root_dir(argv[1])) == NULL){
+    if ((root_dir = check_root_dir(argv[1])) == NULL){
         fprintf(stderr, "argv[1] is invalid directory\n");
         exit(FAILED);
     }
