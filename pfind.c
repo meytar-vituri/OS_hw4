@@ -24,12 +24,52 @@ int num_of_created_threads = 0;
 pthread_mutex_t num_of_created_lock;
 
 pthread_mutex_t queue_actions_lock;
+pthread_mutex_t queue_waiting_lock;
+
 
 char *search_term;
 
+pthread_t *threads;
 //---------conditional variables----------
 pthread_cond_t empty_queue_cv;
 pthread_cond_t num_of_threads_cv;
+
+// for debugging only
+#include <stdarg.h>
+#include <stdint.h>
+
+long getNanoTs(void) {
+    struct timespec spec;
+    clock_gettime(CLOCK_REALTIME, &spec);
+    return (int64_t) (spec.tv_sec) * (int64_t) 1000000000 + (int64_t) (spec.tv_nsec);
+}
+
+char *debugFormat = "[%02x] : %lu : %d : ";
+char *debugLevel = "***";
+
+void debugPrintf(char *fmt, ...) {
+    pthread_mutex_t printLock;
+    if (pthread_mutex_init(&printLock, NULL)) {
+        printf("ERROR creating printLock\n");
+    }
+    va_list args;
+    va_start(args, fmt);
+    char *placeholder = malloc(strlen(debugFormat) + strlen(debugLevel) + 1);
+    char *newFmt = malloc(strlen(debugLevel) + strlen(fmt) + 1);
+    snprintf(placeholder, strlen(debugFormat) + strlen(debugLevel) + 1, "%s%s", debugLevel, debugFormat);
+    snprintf(newFmt, strlen(debugLevel) + strlen(fmt) + 1, "%s%s", debugLevel, fmt);
+    pthread_mutex_lock(&printLock);
+    printf(placeholder, pthread_self(), getNanoTs(), num_of_running_threads);
+    vprintf(newFmt, args);
+    pthread_mutex_unlock(&printLock);
+    fflush(stdout);
+    free(newFmt);
+    free(placeholder);
+    va_end(args);
+    pthread_mutex_destroy(&printLock);
+}
+//++++++++++++++++=
+
 
 
 //---------the queue struct and the queue methods----------
@@ -49,9 +89,7 @@ fifo_queue *dir_queue;
 
 
 int is_empty(){
-    pthread_mutex_lock(&queue_actions_lock);
-    int val = (dir_queue->head == NULL && dir_queue->tail == NULL);
-    pthread_mutex_lock(&queue_actions_lock);
+    int val = (dir_queue->head == NULL);
     return val;
 }
 
@@ -70,9 +108,8 @@ int push ( char *dir_name ){
     temp->dir_name = dir_name;
     temp->next_node = NULL;
     pthread_mutex_lock(&queue_actions_lock);
-    if (dir_queue->head == NULL ){
-        dir_queue->head = temp;
-        dir_queue -> tail = temp ->next_node;
+    if (dir_queue->tail == NULL ){
+        dir_queue->head = dir_queue->tail = temp;
         pthread_cond_signal(&empty_queue_cv);
         pthread_mutex_unlock(&queue_actions_lock);
         return SUCCESS;
@@ -86,19 +123,28 @@ int push ( char *dir_name ){
 }
 
 char * pop (){
-    pthread_mutex_lock(&queue_actions_lock);
     num_of_running_threads--;
+    pthread_mutex_lock(&queue_waiting_lock);
     if (num_of_running_threads == 0 && is_empty()){
+        debugPrintf("returning null with %d running threads\n", num_of_running_threads);
+        pthread_mutex_unlock(&queue_waiting_lock);
         return NULL;
     }
     while (is_empty()){
-        pthread_cond_wait(&empty_queue_cv, &queue_actions_lock);
+        pthread_cond_wait(&empty_queue_cv, &queue_waiting_lock);
     }
+    pthread_mutex_unlock(&queue_waiting_lock);
     num_of_running_threads++;
+    debugPrintf("locking pop, num of runnign threads:%d\n", num_of_running_threads);
+    pthread_mutex_lock(&queue_actions_lock);
     queue_node *temp = dir_queue->head;
     dir_queue->head = dir_queue->head->next_node;
+    if (dir_queue->head ==NULL){
+        dir_queue->tail = NULL;
+    }
     pthread_mutex_unlock(&queue_actions_lock);
     char *dir = temp ->dir_name;
+    debugPrintf("unlocking pop with %s and  %d running threads\n", dir, num_of_running_threads);
     free(temp);
     return dir;
 }
@@ -129,7 +175,7 @@ char *create_new_path (char *dir, char *entry){
 void handle_entry(char *dir,struct dirent *entry){
     char *cur_path;
     //ignoring the directories . and ..
-    if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..")){
+    if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0){
         return;
     }
     cur_path = create_new_path(dir, entry->d_name);
@@ -143,7 +189,6 @@ void handle_entry(char *dir,struct dirent *entry){
     } else if (d_type ==8 || d_type == 10) {
         if (strstr(entry->d_name, search_term) != NULL){
             matched_files_counter++;
-            printf("%s\n", cur_path);
         }
         free(cur_path);
     }
@@ -152,12 +197,10 @@ void handle_entry(char *dir,struct dirent *entry){
 void iterate_dir (char * dir){
     struct dirent *cur_dirent;
     DIR *iterated_dir;
-
-//    char path[PATH_MAX];
     if ((iterated_dir = opendir(dir)) == NULL){
         num_of_running_threads--;
         num_of_failed_threads++;
-        fprintf(stderr, "error opening the dir %s\n", dir);
+        fprintf(stderr, "Directory %s: Permission denied.\n", dir);
         pthread_exit(NULL);
     }
 
@@ -173,19 +216,17 @@ void iterate_dir (char * dir){
         fprintf(stderr, "error reading from dir%s\n", dir);
         pthread_exit(NULL);
     }
-
-
 }
 
 void *threads_main (){
     //wait until all threads created
     pthread_mutex_lock(&num_of_created_lock);
     if (num_of_threads != num_of_created_threads){
+        debugPrintf("waiting\n");
         pthread_cond_wait(&num_of_threads_cv, &num_of_created_lock);
     }
+    num_of_running_threads++;
     pthread_mutex_unlock(&num_of_created_lock);
-
-
     while (1){
         char *dir = pop();
         if (dir == NULL){
@@ -205,27 +246,28 @@ void wait_for_all_threads(pthread_t *threads) {
 }
 
 //a function that allocates memory for an array of threads and initializing each one of them.
-void create_threads (pthread_t *threads, int num_of_threads){
-    threads = (pthread_t *)malloc(num_of_threads*sizeof(pthread_t));
+void create_threads (){
+    threads = (pthread_t *)malloc(num_of_threads*sizeof(pthread_t ));
     if (threads == NULL){
         fprintf(stderr, "error allocating memory for threads\n");
         exit(FAILED);
     }
     for (int i=0; i<num_of_threads;i ++){
         pthread_mutex_lock(&num_of_created_lock);
-        if (0 != pthread_create(&(threads[i]), NULL, &threads_main, NULL)){
+        if (0 != pthread_create(&(threads[i]), NULL, threads_main, NULL)){
             fprintf(stderr, "error creating thread number %d\n", i);
             pthread_mutex_unlock(&num_of_created_lock);
             exit(FAILED);
         } else {
             num_of_created_threads ++;
-            num_of_running_threads++;
+            debugPrintf("numofcreated:%d\n", num_of_created_threads);
             if (num_of_created_threads == num_of_threads){ //if all all threads created - signal the threads to start working
                 pthread_cond_broadcast(&num_of_threads_cv);
             }
             pthread_mutex_unlock(&num_of_created_lock);
         }
     }
+    debugPrintf("created threads inside the func is OK with %d runnig threads and %d created threads \n", num_of_running_threads, num_of_created_threads);
 }
 
 //---------general use functions----------
@@ -246,6 +288,12 @@ void init_locks_and_cvs(){
         exit(FAILED);
     }
 
+    rc = pthread_mutex_init(&queue_waiting_lock, NULL);
+    if (rc) {
+        fprintf(stderr, "ERROR in pthread_mutex_init(): queue_waiting_lock lock\n");
+        exit(FAILED);
+    }
+
     rc = pthread_cond_init(&empty_queue_cv, NULL);
     if (rc) {
         fprintf(stderr, "ERROR in pthread_cond_init(): empty queue cond var lock\n");
@@ -263,6 +311,7 @@ void init_locks_and_cvs(){
 void destroy_locks_and_cvs(){
     pthread_mutex_destroy(&num_of_created_lock);
     pthread_mutex_destroy(&queue_actions_lock);
+    pthread_mutex_destroy(&queue_waiting_lock);
     pthread_cond_destroy(&empty_queue_cv);
     pthread_cond_destroy(&num_of_threads_cv);
 }
@@ -292,14 +341,13 @@ int main(int argc, char *argv[]) {
         exit(FAILED);
     }
     char *root_dir ;
-    pthread_t *threads;
     dir_queue = (fifo_queue *)malloc(sizeof(fifo_queue));
     if (dir_queue == NULL){
         fprintf(stderr, "FIFO queue memory allocation failed\n");
         exit(FAILED);
     }
-    dir_queue->head = NULL;
-    dir_queue->tail = NULL;
+    dir_queue->head =dir_queue->tail =  NULL;
+
 
     if ((root_dir = check_root_dir(argv[1])) == NULL){
         fprintf(stderr, "argv[1] is invalid directory\n");
@@ -318,10 +366,8 @@ int main(int argc, char *argv[]) {
     }
     //initializing all the locks and the conditional variables
     init_locks_and_cvs();
-
     //create an array of num_of_threads threads and create them.
-    create_threads(threads, num_of_threads);
-
+    create_threads();
     //wait for all the threads to finish
     wait_for_all_threads(threads);
     printf("Done searching, found %d files\n", matched_files_counter);

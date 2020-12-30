@@ -6,3 +6,4 @@ modules.order
 Module.symvers
 mutex_ex2.c
 mutex_ex3.c
+test/
