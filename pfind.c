@@ -89,7 +89,9 @@ fifo_queue *dir_queue;
 
 
 int is_empty(){
+    pthread_mutex_lock(&queue_actions_lock);
     int val = (dir_queue->head == NULL);
+    pthread_mutex_unlock(&queue_actions_lock);
     return val;
 }
 
@@ -124,18 +126,20 @@ int push ( char *dir_name ){
 
 char * pop (){
     num_of_running_threads--;
+    //debugPrintf("locking pop\n");
     pthread_mutex_lock(&queue_waiting_lock);
-    if (num_of_running_threads == 0 && is_empty()){
-        debugPrintf("returning null with %d running threads\n", num_of_running_threads);
-        pthread_mutex_unlock(&queue_waiting_lock);
-        return NULL;
-    }
-    while (is_empty()){
+    while (is_empty() && num_of_running_threads>0){
+        //debugPrintf("waiting with %d running threads\n", num_of_running_threads);
         pthread_cond_wait(&empty_queue_cv, &queue_waiting_lock);
     }
     pthread_mutex_unlock(&queue_waiting_lock);
+    if (num_of_running_threads == 0 && is_empty()){
+        //debugPrintf("returning null with %d running threads\n", num_of_running_threads);
+        pthread_cond_signal(&empty_queue_cv);
+        return NULL;
+    }
     num_of_running_threads++;
-    debugPrintf("locking pop, num of runnign threads:%d\n", num_of_running_threads);
+    //debugPrintf("locking pop, num of runnign threads:%d\n", num_of_running_threads);
     pthread_mutex_lock(&queue_actions_lock);
     queue_node *temp = dir_queue->head;
     dir_queue->head = dir_queue->head->next_node;
@@ -144,7 +148,7 @@ char * pop (){
     }
     pthread_mutex_unlock(&queue_actions_lock);
     char *dir = temp ->dir_name;
-    debugPrintf("unlocking pop with %s and  %d running threads\n", dir, num_of_running_threads);
+    //debugPrintf("unlocking pop with %s and  %d running threads\n", dir, num_of_running_threads);
     free(temp);
     return dir;
 }
@@ -188,6 +192,7 @@ void handle_entry(char *dir,struct dirent *entry){
         }
     } else if (d_type ==8 || d_type == 10) {
         if (strstr(entry->d_name, search_term) != NULL){
+            printf("%s\n", cur_path);
             matched_files_counter++;
         }
         free(cur_path);
@@ -222,7 +227,7 @@ void *threads_main (){
     //wait until all threads created
     pthread_mutex_lock(&num_of_created_lock);
     if (num_of_threads != num_of_created_threads){
-        debugPrintf("waiting\n");
+        //debugPrintf("waiting\n");
         pthread_cond_wait(&num_of_threads_cv, &num_of_created_lock);
     }
     num_of_running_threads++;
@@ -230,7 +235,7 @@ void *threads_main (){
     while (1){
         char *dir = pop();
         if (dir == NULL){
-            break;
+            pthread_exit(NULL);
         }
         iterate_dir(dir);
         free(dir);
@@ -260,14 +265,14 @@ void create_threads (){
             exit(FAILED);
         } else {
             num_of_created_threads ++;
-            debugPrintf("numofcreated:%d\n", num_of_created_threads);
+            //debugPrintf("numofcreated:%d\n", num_of_created_threads);
             if (num_of_created_threads == num_of_threads){ //if all all threads created - signal the threads to start working
                 pthread_cond_broadcast(&num_of_threads_cv);
             }
             pthread_mutex_unlock(&num_of_created_lock);
         }
     }
-    debugPrintf("created threads inside the func is OK with %d runnig threads and %d created threads \n", num_of_running_threads, num_of_created_threads);
+    //debugPrintf("created threads inside the func is OK with %d runnig threads and %d created threads \n", num_of_running_threads, num_of_created_threads);
 }
 
 //---------general use functions----------
